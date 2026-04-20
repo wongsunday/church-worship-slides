@@ -6,6 +6,13 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.1.1] - 2026-04-20
+
+### Changed
+- **Step 0 simplified:** Removed major/minor version branching. All updates (patch, minor, major) now follow the same single path — self-patch, show changelog, present `.skill` card, proceed. Major version bumps are flagged with a prominent notice in the update message rather than a hard stop.
+
+---
+
 ## [1.1.0] - 2026-04-20
 
 ### Added
