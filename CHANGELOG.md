@@ -6,6 +6,11 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.2.1] - 2026-04-21
+
+### Fixed
+- **Installation Instructions:** Corrected the README to reflect the actual GitHub import method in Manus ('Skills' > 'Add' > 'Import from GitHub').
+
 ## [1.2.0] - 2026-04-21
 
 ### Added

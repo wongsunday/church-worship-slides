@@ -13,8 +13,8 @@ A [Manus](https://manus.im) skill that generates 16:9 PPTX worship presentation 
 
 ## Install
 
-1. Go to the [Releases](../../releases) page and download the latest `.skill` file.
-2. In Manus, open any conversation and drop the `.skill` file into the chat, or use the skill import option.
+1. In Manus, navigate to 'Skills' > 'Add' > 'Import from GitHub'.
+2. Paste the GitHub repository URL: `https://github.com/wongsunday/church-worship-slides`.
 3. Click **"Add to My Skills"**.
 
 ## Updates
