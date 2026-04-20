@@ -6,6 +6,17 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.2.0] - 2026-04-21
+
+### Added
+- **Step 3 – Inline image list-view:** Background options are now presented as a numbered list with inline image previews (uploaded to CDN URLs via `manus-upload-file`) so users can see each option directly in the chat without clicking external links.
+
+### Changed
+- **Step 3 – Pre-filter before user selection:** Resolution (< 1280×720) and watermark checks (Shutterstock, Getty, iStock, Dreamstime) are now applied silently *before* presenting options to the user. Low-res or watermarked images are discarded automatically; if fewer than 3 valid images remain, a refined search is triggered.
+- **Step 4 – Resolution validation moved upstream:** Step 4 now only confirms the resolution tier of the already-validated image; the disruptive "pick again" loop after user selection has been eliminated.
+
+---
+
 ## [1.1.3] - 2026-04-20
 
 ### Changed

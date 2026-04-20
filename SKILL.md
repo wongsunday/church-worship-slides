@@ -2,7 +2,7 @@
 name: church-worship-slides
 description: "Generate 16:9 church worship presentation slides (PPTX) from song lyrics. Use for: creating worship slides with nature background photos, semi-transparent overlay boxes, and large Chinese/English lyrics. Handles proactive lyrics search and confirmation when only a song name is given, lyric splitting, background search, resolution validation, overlay colour selection, pixel-perfect rendering at Full HD (1920×1080), post-build review loop, and appending multiple songs into one worship set."
 metadata:
-  version: "1.1.3"
+  version: "1.2.0"
 ---
 
 # Church Worship Slides
@@ -95,7 +95,26 @@ Search for **distinct nature/worship background images** using the `search` tool
 
 **Query strategy:** derive 2–3 queries from the song's theme/mood. Always include at least one English query. Prefer sources known for high-resolution free images (e.g., Pexels, Unsplash).
 
-Show thumbnails to the user and ask them to choose one. Copy the chosen image to the working directory as `background.jpg`.
+**Pre-filter before showing to user:** After fetching results, silently validate each image **before** presenting options:
+1. **Resolution check** – skip any image below 1280 × 720 px.
+2. **Watermark check** – skip images from known watermarked sources (e.g., Shutterstock, Getty, iStock, Dreamstime preview thumbnails). Prefer Pexels, Unsplash, Pixabay, or Wikimedia.
+3. If fewer than 3 valid images remain after filtering, silently re-run the search with refined/broader keywords (e.g. adding "high resolution", "4k", "Pexels", "Unsplash") before presenting.
+
+**Present images using list-view with inline previews.** Upload each image via `manus-upload-file` to get a CDN URL, then display using this format:
+
+```
+1. **[Option Name](CDN_URL)**
+   ![Option Name](CDN_URL)
+   *Brief description of mood/scene.*
+
+2. **[Option Name](CDN_URL)**
+   ![Option Name](CDN_URL)
+   *Brief description of mood/scene.*
+```
+
+This allows users to see each image inline in the chat. Ask the user to pick one by number.
+
+Copy the chosen image to the working directory as `background.jpg`.
 
 **Quality criteria:**
 - Simple composition, not cluttered
@@ -106,7 +125,7 @@ Show thumbnails to the user and ask them to choose one. Copy the chosen image to
 
 ## Step 4 – Validate Background Resolution
 
-After the user picks a background, check its pixel dimensions **before** rendering:
+Resolution is pre-validated in Step 3 before the user sees any options. After the user picks a background, simply confirm the resolution tier and proceed:
 
 ```python
 from PIL import Image
@@ -116,7 +135,7 @@ w, h = img.size
 
 | Source Resolution | Action |
 |---|---|
-| Below 1280 × 720 | **Reject** – silently re-run the image search with refined/broader keywords (e.g. adding "high resolution", "4k", "Unsplash", "Pexels") and present the new candidates to the user. Do not ask them to pick from the original low-res batch again. |
+| Below 1280 × 720 | **Should not occur** – already filtered in Step 3. If somehow reached, silently re-search and re-present. |
 | 1280 × 720 – 1919 × 1079 | **Accept with warning** – script will upscale; notify user quality may be slightly reduced |
 | 1920 × 1080 – 3839 × 2159 | **Ideal** – use as-is |
 | 3840 × 2160 and above | **Auto-downsample** – script caps at 3840px wide to keep memory reasonable |
