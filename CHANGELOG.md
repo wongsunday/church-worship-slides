@@ -6,6 +6,13 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.1.3] - 2026-04-20
+
+### Changed
+- `version` field reverted to `metadata.version` (Manus convention) for validator compatibility.
+
+---
+
 ## [1.1.2] - 2026-04-20
 
 ### Changed
