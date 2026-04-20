@@ -6,6 +6,13 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.1.2] - 2026-04-20
+
+### Changed
+- `version` field moved to top-level frontmatter (gstack convention), removing `metadata` nesting.
+
+---
+
 ## [1.1.1] - 2026-04-20
 
 ### Changed
