@@ -2,7 +2,7 @@
 name: church-worship-slides
 description: "Generate 16:9 church worship presentation slides (PPTX) from song lyrics. Use for: creating worship slides with nature background photos, semi-transparent overlay boxes, and large Chinese/English lyrics. Handles proactive lyrics search and confirmation when only a song name is given, lyric splitting, background search, resolution validation, overlay colour selection, pixel-perfect rendering at Full HD (1920×1080), post-build review loop, and appending multiple songs into one worship set."
 metadata:
-  version: "1.2.1"
+  version: "1.2.2"
 ---
 
 # Church Worship Slides

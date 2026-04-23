@@ -6,6 +6,11 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.2.2] - 2026-04-21
+
+### Added
+- **README Sample Output:** Added inline image previews and a direct download link for the sample PowerPoint presentation to the README.
+
 ## [1.2.1] - 2026-04-21
 
 ### Fixed

@@ -29,3 +29,16 @@ For **major version** updates (breaking changes), the skill will stop and ask yo
 ## Release History
 
 See [CHANGELOG.md](CHANGELOG.md).
+
+## Sample Output
+
+Here are some examples of the generated slides and the full presentation:
+
+### Sample Verse Slide
+![Sample Verse Slide](https://files.manuscdn.com/user_upload_by_module/session_file/310519663106868029/jZEYmkTNZmjkMLSz.jpg)
+
+### Sample Chorus Slide
+![Sample Chorus Slide](https://files.manuscdn.com/user_upload_by_module/session_file/310519663106868029/vmDGrdcXPLIWdsue.jpg)
+
+### Full Sample Presentation
+[Download Sample PPTX](https://files.manuscdn.com/user_upload_by_module/session_file/310519663106868029/HeGFOKbCOcUvAOZY.pptx)
