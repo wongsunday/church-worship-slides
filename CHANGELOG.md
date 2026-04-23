@@ -6,6 +6,12 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.3.0] - 2026-04-23
+
+### Added
+- **README overhaul:** Added motivation/background section, bilingual (English + Traditional Chinese) content throughout, pitching copy, Manus Lite recommendation with credit estimate, reference chat link, and sample prompts covering four scenarios (create, adjust lyrics arrangement, adjust design, add another song).
+- **Sample Output section:** Inline slide previews using permanent GitHub raw image URLs and a direct download link for the sample PPTX.
+
 ## [1.2.2] - 2026-04-21
 
 ### Added
