@@ -22,7 +22,21 @@ RES_MIN_W, RES_MIN_H, RES_WARN_W, RES_WARN_H, RES_DOWNSAMPLE_W = 1280, 720, 1920
 DELIVERY_QUALITY = {"screen": 75, "standard": 92, "print": 98}
 RENDER_MODES = ("image", "editable")
 RENDER_MODE_KEYWORD_PREFIX = "church-worship-slides:render-mode="
-EDITABLE_FONT_FAMILY = "Noto Sans CJK TC"
+# Editable-mode typography must survive font substitution on macOS/Keynote and Windows.
+# "Arial" and "PingFang TC" ship with macOS; "Microsoft JhengHei" ships with Windows.
+# Latin runs use Arial (metric-compatible with Liberation Sans, used for measurement).
+EDITABLE_LATIN_FONT = "Arial"
+EDITABLE_CJK_FONT = "PingFang TC"
+# Font actually used to measure editable geometry, so the box matches the delivered font.
+EDITABLE_METRIC_FONTS = [
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+]
+# Substituted fonts can be wider/taller than the measured font; reserve headroom.
+EDITABLE_WIDTH_SAFETY = 1.22
+EDITABLE_LINE_HEIGHT_FACTOR = 1.32
+EDITABLE_AUTOFIT_FONT_SCALE = 92500  # OOXML fontScale: allow ~7.5% shrink before overflow
+EDITABLE_AUTOFIT_LINE_REDUCTION = 10000
 FONT_CANDIDATES = [
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Black.ttc",
@@ -71,6 +85,57 @@ def auto_font_size(lines, requested_size):
             return font, size
         size -= 4
     return load_font(MIN_FONT_SIZE), MIN_FONT_SIZE
+
+
+def load_editable_metric_font(size):
+    """Load the font whose metrics approximate what macOS/Windows will actually render."""
+    for path in EDITABLE_METRIC_FONTS:
+        if os.path.exists(path):
+            try:
+                return ImageFont.truetype(path, size)
+            except OSError:
+                pass
+    return load_font(size)
+
+
+def editable_auto_font_size(lines, requested_size):
+    """Choose the largest size that fits the safe width using substitution-tolerant metrics."""
+    if requested_size > 0:
+        return requested_size
+    draw = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    size = MAX_FONT_SIZE
+    while size > MIN_FONT_SIZE:
+        metric_font = load_editable_metric_font(size)
+        widest = max(draw.textlength(line, font=metric_font) for line in lines)
+        if widest * EDITABLE_WIDTH_SAFETY <= MAX_LINE_WIDTH:
+            return size
+        size -= 2
+    return MIN_FONT_SIZE
+
+
+def editable_layout_for_text(text, font_size_px):
+    """Size the overlay box for PowerPoint/Keynote line boxes, not tight ink bounds.
+
+    Uses a substitution-tolerant metric font, line-height based vertical sizing, and
+    width/height safety headroom so a wider substituted font still fits inside the box.
+    """
+    lines = text.split("\n")
+    metric_font = load_editable_metric_font(font_size_px)
+    draw = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    widths = [draw.textlength(line, font=metric_font) for line in lines]
+    text_width = max(widths) * EDITABLE_WIDTH_SAFETY
+    line_height = font_size_px * EDITABLE_LINE_HEIGHT_FACTOR
+    text_height = line_height * len(lines)
+
+    box_w = int(min(W - 40, text_width + PAD_H * 2))
+    box_h = int(text_height + PAD_V * 2)
+    return {
+        "lines": lines,
+        "x": max(20, (W - box_w) // 2),
+        "y": max(30, int(H / 4 - box_h / 2)),
+        "w": box_w,
+        "h": box_h,
+    }
 
 
 def line_metrics(lines, font):
@@ -157,15 +222,32 @@ def remove_outline(shape):
     shape.line.fill.background()
 
 
-def set_cjk_typeface(run, family):
-    """Set East Asian and complex-script typefaces, not just the Latin font slot."""
+def set_portable_typefaces(run, latin_font, cjk_font):
+    """Set Latin, East Asian, and complex-script typefaces to fonts present on macOS/Windows.
+
+    Without an explicit East Asian typeface, Keynote/PowerPoint substitute an arbitrary
+    font whose metrics differ from the measured layout, which caused v1.4.0 overflow.
+    """
     rpr = run._r.get_or_add_rPr()
-    for tag in ("a:ea", "a:cs"):
+    for tag, typeface in (("a:latin", latin_font), ("a:ea", cjk_font), ("a:cs", cjk_font)):
         element = rpr.find(qn(tag))
         if element is None:
             element = OxmlElement(tag)
             rpr.append(element)
-        element.set("typeface", family)
+        element.set("typeface", typeface)
+
+
+def enable_shrink_on_overflow(text_frame, font_scale, line_reduction):
+    """Emit OOXML normAutofit so renderers shrink text instead of spilling out of the box."""
+    body_pr = text_frame._txBody.bodyPr
+    for tag in ("a:normAutofit", "a:spAutoFit", "a:noAutofit"):
+        existing = body_pr.find(qn(tag))
+        if existing is not None:
+            body_pr.remove(existing)
+    autofit = OxmlElement("a:normAutofit")
+    autofit.set("fontScale", str(font_scale))
+    autofit.set("lnSpcReduction", str(line_reduction))
+    body_pr.append(autofit)
 
 
 def add_cover_background(slide, bg_path, slide_width, slide_height):
@@ -191,7 +273,7 @@ def add_editable_slide(prs, text, bg_path, font, font_size_px, overlay_rgb, over
     set_fill(dimmer, (0, 0, 0), 50)
     remove_outline(dimmer)
 
-    layout = layout_for_text(text, font)
+    layout = editable_layout_for_text(text, font_size_px)
     x = px_to_emu(layout["x"], prs.slide_width, W)
     y = px_to_emu(layout["y"], prs.slide_height, H)
     width = px_to_emu(layout["w"], prs.slide_width, W)
@@ -200,26 +282,32 @@ def add_editable_slide(prs, text, bg_path, font, font_size_px, overlay_rgb, over
     set_fill(overlay, overlay_rgb, overlay_alpha)
     remove_outline(overlay)
 
+    # The text box spans the overlay exactly; padding lives in the box geometry, so the
+    # text frame keeps only a small inset and relies on autofit for the final guard.
     textbox = slide.shapes.add_textbox(x, y, width, height)
     frame = textbox.text_frame
     frame.clear()
     frame.word_wrap = True
     frame.vertical_anchor = MSO_ANCHOR.MIDDLE
-    frame.margin_left = px_to_emu(PAD_H, prs.slide_width, W)
-    frame.margin_right = px_to_emu(PAD_H, prs.slide_width, W)
-    frame.margin_top = px_to_emu(PAD_V, prs.slide_height, H)
-    frame.margin_bottom = px_to_emu(PAD_V, prs.slide_height, H)
+    inset_h = px_to_emu(PAD_H // 3, prs.slide_width, W)
+    inset_v = px_to_emu(PAD_V // 3, prs.slide_height, H)
+    frame.margin_left = frame.margin_right = inset_h
+    frame.margin_top = frame.margin_bottom = inset_v
+    enable_shrink_on_overflow(frame, EDITABLE_AUTOFIT_FONT_SCALE, EDITABLE_AUTOFIT_LINE_REDUCTION)
+
+    font_size_pt = Pt(font_size_px * 72 / 96)
     for index, line in enumerate(layout["lines"]):
         paragraph = frame.paragraphs[0] if index == 0 else frame.add_paragraph()
         paragraph.text = line
         paragraph.alignment = PP_ALIGN.CENTER
-        paragraph.space_after = Pt(LINE_GAP * 72 / 96) if index < len(layout["lines"]) - 1 else Pt(0)
+        paragraph.space_after = Pt(0)
+        paragraph.line_spacing = EDITABLE_LINE_HEIGHT_FACTOR
         for run in paragraph.runs:
-            run.font.name = EDITABLE_FONT_FAMILY
-            run.font.size = Pt(font_size_px * 72 / 96)
+            run.font.name = EDITABLE_LATIN_FONT
+            run.font.size = font_size_pt
             run.font.bold = True
             run.font.color.rgb = RGBColor(255, 255, 255)
-            set_cjk_typeface(run, EDITABLE_FONT_FAMILY)
+            set_portable_typefaces(run, EDITABLE_LATIN_FONT, EDITABLE_CJK_FONT)
 
 
 def set_presentation_render_mode(prs, render_mode):
@@ -243,7 +331,10 @@ def create_pptx(lyrics_data, bg_path, output_path, overlay_rgb, overlay_alpha, f
     bg_img = validate_background(bg_path)
     all_lines = [line for slide in lyrics_data for line in slide["text"].split("\n")]
     font, used_size = auto_font_size(all_lines, font_size)
-    print(f"Render: {W}x{H} | mode: {render_mode} | font: {used_size}px | overlay: rgb{overlay_rgb} alpha={overlay_alpha}")
+    # Editable decks are measured with a substitution-tolerant font, so they get their own size.
+    editable_size = editable_auto_font_size(all_lines, font_size) if render_mode == "editable" else used_size
+    reported_size = editable_size if render_mode == "editable" else used_size
+    print(f"Render: {W}x{H} | mode: {render_mode} | font: {reported_size}px | overlay: rgb{overlay_rgb} alpha={overlay_alpha}")
     preview_dir = os.path.join(os.path.dirname(os.path.abspath(output_path)), "_slide_imgs")
     os.makedirs(preview_dir, exist_ok=True)
 
@@ -257,7 +348,7 @@ def create_pptx(lyrics_data, bg_path, output_path, overlay_rgb, overlay_alpha, f
             slide = prs.slides.add_slide(prs.slide_layouts[6])
             slide.shapes.add_picture(preview_path, 0, 0, width=prs.slide_width, height=prs.slide_height)
         else:
-            add_editable_slide(prs, slide_data["text"], bg_path, font, used_size, overlay_rgb, overlay_alpha)
+            add_editable_slide(prs, slide_data["text"], bg_path, font, editable_size, overlay_rgb, overlay_alpha)
         print(f"  Slide {slide_data['index']:02d}: preview {os.path.getsize(preview_path) // 1024} KB")
     prs.save(output_path)
     print(f"Saved: {output_path} ({os.path.getsize(output_path) // 1024} KB)")

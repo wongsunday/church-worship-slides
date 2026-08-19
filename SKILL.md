@@ -2,7 +2,7 @@
 name: church-worship-slides
 description: "Generate 16:9 church worship presentation slides (PPTX) from song lyrics. Use for: creating worship slides with nature background photos, semi-transparent overlay boxes, and large Chinese/English lyrics. Supports pixel-stable image-rendered decks and editable native PowerPoint-object decks, plus lyric search, design selection, review, and multi-song append workflows."
 metadata:
-  version: "1.4.0"
+  version: "1.4.1"
 ---
 
 # Church Worship Slides
@@ -16,9 +16,11 @@ Before acquiring lyrics, establish the deck’s `render-mode`. If the user does 
 | Render mode | PPTX contents | Best for | Trade-off |
 |---|---|---|---|
 | `image` *(default)* | One fully rendered slide image per slide | Pixel-stable projection across PowerPoint and LibreOffice | Lyrics, overlay, and dimmer cannot be edited independently |
-| `editable` | A native background picture, dimmer rectangle, rounded overlay, and lyric text box per slide | Later manual edits in PowerPoint or compatible editors | Font rendering can vary slightly when the deck is opened on a device without a comparable CJK font |
+| `editable` | A native background picture, dimmer rectangle, rounded overlay, and lyric text box per slide | Later manual edits in PowerPoint, Keynote, or compatible editors | Line breaks may reflow slightly on devices with different installed fonts |
 
 In `editable` mode, never flatten the slide into a single image. Keep the background, translucent dimmer, overlay, and lyric text as separate PowerPoint objects. Review JPEGs are still generated for chat preview only and are **not** embedded into editable slides.
+
+**Font portability is critical in `editable` mode.** Editable text must reference fonts that exist on the user's machine, otherwise Keynote and PowerPoint substitute a different font whose wider metrics push lyrics outside the overlay box. The script therefore tags runs with `Arial` (Latin) and `PingFang TC` (CJK), measures geometry with a metric-compatible font rather than the sandbox-only Noto font, sizes the overlay from line-height rather than tight ink bounds, and emits `normAutofit` so any residual overflow shrinks instead of spilling. Do not substitute a sandbox-only font family such as `Noto Sans CJK TC` into editable runs.
 
 If the user provides only a song name (without lyrics), **proactively search for the lyrics** and confirm them with the user before proceeding.
 

@@ -15,6 +15,7 @@ from render_slides import (  # noqa: E402
     RENDER_MODES,
     add_editable_slide,
     auto_font_size,
+    editable_auto_font_size,
     get_presentation_render_mode,
     parse_color,
     render_slide,
@@ -70,6 +71,8 @@ def main():
 
     all_lines = [line for slide in lyrics_data for line in slide["text"].split("\n")]
     font, used_size = auto_font_size(all_lines, args.font_size)
+    if render_mode == "editable":
+        used_size = editable_auto_font_size(all_lines, args.font_size)
     overlay_rgb = parse_color(args.overlay_color)
     preview_dir = os.path.join(os.path.dirname(os.path.abspath(args.output)), "_slide_imgs")
     os.makedirs(preview_dir, exist_ok=True)

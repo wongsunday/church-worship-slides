@@ -6,6 +6,16 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.4.1] - 2026-08-19
+
+### Fixed
+- **Editable-mode lyric overflow:** Editable slides no longer push lyrics outside the overlay box on macOS/Keynote. Runs previously referenced `Noto Sans CJK TC`, a sandbox-only font, so Keynote substituted a font up to 18% wider than the measured layout.
+- **Portable typography:** Editable runs now declare `Arial` for Latin text and `PingFang TC` for East Asian text, with geometry measured using a metric-compatible font instead of the sandbox Noto font.
+- **Box sizing:** The overlay box is now sized from renderer line-height metrics with width/height safety headroom, replacing tight Pillow ink bounds that could never fit multi-line text.
+- **Shrink-to-fit safeguard:** Editable text frames now emit OOXML `normAutofit`, so any residual overflow shrinks the text instead of spilling out of the box.
+
+---
+
 ## [1.4.0] - 2026-08-19
 
 ### Added
