@@ -6,6 +6,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.4.0] - 2026-08-19
+
+### Added
+- **Editable render mode:** Added `--render-mode editable` to generate PPTX slides with independently selectable background pictures, translucent dimmers, rounded overlays, and lyric text boxes instead of flattening the slide into one image.
+- **Render-mode continuity:** Added a mode marker to new decks so appended songs automatically preserve the original deck format and reject conflicting choices.
+
+### Changed
+- **Default compatibility:** Retained the existing image-rendered workflow as `--render-mode image` by default for pixel-stable projection output.
+- **Preview separation:** Continued to create JPEG review previews for chat delivery while ensuring they are not embedded into editable decks.
+
+---
+
 ## [1.3.0] - 2026-04-23
 
 ### Added

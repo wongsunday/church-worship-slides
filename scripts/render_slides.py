@@ -1,65 +1,28 @@
 #!/usr/bin/env python3
-"""
-render_slides.py  –  Church Worship Slides Generator
-Usage:
-  python render_slides.py \
-    --lyrics   lyrics.json \
-    --bg       background.jpg \
-    --output   Song_Title.pptx \
-    [--overlay-color  "0,0,0"]      # R,G,B  default black
-    [--overlay-alpha  185]           # 0-255  default 185 (~73%)
-    [--font-size      0]             # px     default 0 (auto-scales)
-    [--delivery-mode  standard]      # screen | standard | print
-
-Resolution Policy:
-  - Minimum accepted background: 1280x720 (exits with error if below)
-  - 1280x720–1919x1079: accepted with upscale warning
-  - 1920x1080–3839x2159: ideal, used as-is
-  - 4K and above: downsampled to 3840x2160 before rendering
-
-Delivery Modes (JPEG quality for embedded slide images):
-  screen   = 75   (small file, web/email sharing)
-  standard = 92   (default, balanced quality for church use)
-  print    = 98   (archival / high-fidelity)
-
-lyrics.json format:
-  [
-    {"index": 1, "text": "Line one\nLine two"},
-    {"index": 2, "text": "Line three\nLine four\nLine five"}
-  ]
-"""
+"""Generate worship-slide PPTX files in image or editable render mode."""
 
 import argparse
 import json
 import os
 import sys
+
 from PIL import Image, ImageDraw, ImageFont
 from pptx import Presentation
-from pptx.util import Inches
+from pptx.dml.color import RGBColor
+from pptx.enum.shapes import MSO_SHAPE
+from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
+from pptx.oxml.ns import qn
+from pptx.oxml.xmlchemy import OxmlElement
+from pptx.util import Inches, Pt
 
-# ── Render Resolution (always Full HD internally) ─────────────────────────────
-W, H           = 1920, 1080
-LINE_GAP       = 24
-PAD_H          = 80
-PAD_V          = 45
-BOX_RADIUS     = 18
-SHADOW_OFFSET  = 4
-MAX_FONT_SIZE  = 90
-MIN_FONT_SIZE  = 48
-MAX_LINE_WIDTH = int(W * 0.78)
-
-# ── Resolution Policy ─────────────────────────────────────────────────────────
-RES_MIN_W, RES_MIN_H       = 1280, 720    # hard minimum – reject below this
-RES_WARN_W, RES_WARN_H     = 1920, 1080  # warn if below Full HD
-RES_DOWNSAMPLE_W           = 3840        # downsample width if source exceeds 4K
-
-# ── Delivery Mode → JPEG Quality ─────────────────────────────────────────────
-DELIVERY_QUALITY = {
-    "screen":   75,
-    "standard": 92,
-    "print":    98,
-}
-
+W, H = 1920, 1080
+LINE_GAP, PAD_H, PAD_V, BOX_RADIUS, SHADOW_OFFSET = 24, 80, 45, 18, 4
+MAX_FONT_SIZE, MIN_FONT_SIZE, MAX_LINE_WIDTH = 90, 48, int(W * 0.78)
+RES_MIN_W, RES_MIN_H, RES_WARN_W, RES_WARN_H, RES_DOWNSAMPLE_W = 1280, 720, 1920, 1080, 3840
+DELIVERY_QUALITY = {"screen": 75, "standard": 92, "print": 98}
+RENDER_MODES = ("image", "editable")
+RENDER_MODE_KEYWORD_PREFIX = "church-worship-slides:render-mode="
+EDITABLE_FONT_FAMILY = "Noto Sans CJK TC"
 FONT_CANDIDATES = [
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Black.ttc",
@@ -68,32 +31,22 @@ FONT_CANDIDATES = [
 
 
 def validate_background(bg_path):
-    """
-    Validate and pre-process background image per resolution policy.
-    Returns a PIL Image ready for rendering, or raises SystemExit on failure.
-    """
+    """Validate and preprocess the source background per the existing policy."""
     img = Image.open(bg_path).convert("RGBA")
-    w, h = img.size
-
-    if w < RES_MIN_W or h < RES_MIN_H:
-        print(f"ERROR: Background image is too low-resolution ({w}x{h}). "
-              f"Minimum required is {RES_MIN_W}x{RES_MIN_H}. "
-              f"Please source a higher-resolution image.", file=sys.stderr)
+    width, height = img.size
+    if width < RES_MIN_W or height < RES_MIN_H:
+        print(
+            f"ERROR: Background image is too low-resolution ({width}x{height}). "
+            f"Minimum required is {RES_MIN_W}x{RES_MIN_H}.",
+            file=sys.stderr,
+        )
         sys.exit(1)
-
-    if w < RES_WARN_W or h < RES_WARN_H:
-        print(f"WARNING: Background image ({w}x{h}) is below Full HD "
-              f"({RES_WARN_W}x{RES_WARN_H}). Slides will be upscaled; "
-              f"quality may be slightly reduced.")
-
-    if w > RES_DOWNSAMPLE_W:
-        scale = RES_DOWNSAMPLE_W / w
-        new_w = RES_DOWNSAMPLE_W
-        new_h = int(h * scale)
-        img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-        print(f"INFO: Source image downsampled from {w}x{h} to {new_w}x{new_h} "
-              f"(exceeds 4K cap).")
-
+    if width < RES_WARN_W or height < RES_WARN_H:
+        print(f"WARNING: Background image ({width}x{height}) is below Full HD; it will be upscaled.")
+    if width > RES_DOWNSAMPLE_W:
+        new_height = int(height * RES_DOWNSAMPLE_W / width)
+        img = img.resize((RES_DOWNSAMPLE_W, new_height), Image.Resampling.LANCZOS)
+        print(f"INFO: Source image downsampled to {RES_DOWNSAMPLE_W}x{new_height} (exceeds 4K cap).")
     return img
 
 
@@ -102,163 +55,242 @@ def load_font(size):
         if os.path.exists(path):
             try:
                 return ImageFont.truetype(path, size)
-            except Exception:
-                continue
+            except OSError:
+                pass
     return ImageFont.load_default()
 
 
 def auto_font_size(lines, requested_size):
-    """Scale font down if any line exceeds MAX_LINE_WIDTH."""
+    """Use the established pixel-width guard to choose one size for the song."""
     size = requested_size if requested_size > 0 else MAX_FONT_SIZE
+    draw = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
     while size >= MIN_FONT_SIZE:
         font = load_font(size)
-        dummy = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
-        widths = []
-        for line in lines:
-            x0, _, x1, _ = dummy.textbbox((0, 0), line, font=font)
-            widths.append(x1 - x0)
+        widths = [draw.textbbox((0, 0), line, font=font)[2] for line in lines]
         if max(widths) <= MAX_LINE_WIDTH:
             return font, size
         size -= 4
     return load_font(MIN_FONT_SIZE), MIN_FONT_SIZE
 
 
-def measure_lines(draw, lines, font):
-    ink_bboxes = []
-    for line in lines:
-        x0, y0, x1, y1 = draw.textbbox((0, 0), line, font=font)
-        ink_bboxes.append((x1 - x0, y1 - y0, y0))
-    max_ink_w   = max(b[0] for b in ink_bboxes)
-    total_ink_h = sum(b[1] for b in ink_bboxes) + LINE_GAP * (len(lines) - 1)
-    return max_ink_w, total_ink_h, ink_bboxes
+def line_metrics(lines, font):
+    draw = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    boxes = [draw.textbbox((0, 0), line, font=font) for line in lines]
+    metrics = [(x1 - x0, y1 - y0, y0) for x0, y0, x1, y1 in boxes]
+    return max(item[0] for item in metrics), sum(item[1] for item in metrics) + LINE_GAP * (len(lines) - 1), metrics
 
 
-def draw_rounded_rect(draw, x0, y0, x1, y1, r, fill):
-    draw.rectangle([x0+r, y0, x1-r, y1], fill=fill)
-    draw.rectangle([x0, y0+r, x1, y1-r], fill=fill)
-    draw.ellipse([x0,     y0,     x0+2*r, y0+2*r], fill=fill)
-    draw.ellipse([x1-2*r, y0,     x1,     y0+2*r], fill=fill)
-    draw.ellipse([x0,     y1-2*r, x0+2*r, y1],     fill=fill)
-    draw.ellipse([x1-2*r, y1-2*r, x1,     y1],     fill=fill)
+def layout_for_text(text, font):
+    """Return shared Full-HD geometry for review images and editable objects."""
+    lines = text.split("\n")
+    text_width, text_height, metrics = line_metrics(lines, font)
+    box_w, box_h = text_width + PAD_H * 2, text_height + PAD_V * 2
+    return {
+        "lines": lines,
+        "metrics": metrics,
+        "x": max(20, (W - box_w) // 2),
+        "y": max(30, int(H / 4 - box_h / 2)),
+        "w": box_w,
+        "h": box_h,
+    }
+
+
+def rounded_rectangle(draw, x0, y0, x1, y1, radius, fill):
+    draw.rectangle([x0 + radius, y0, x1 - radius, y1], fill=fill)
+    draw.rectangle([x0, y0 + radius, x1, y1 - radius], fill=fill)
+    draw.ellipse([x0, y0, x0 + radius * 2, y0 + radius * 2], fill=fill)
+    draw.ellipse([x1 - radius * 2, y0, x1, y0 + radius * 2], fill=fill)
+    draw.ellipse([x0, y1 - radius * 2, x0 + radius * 2, y1], fill=fill)
+    draw.ellipse([x1 - radius * 2, y1 - radius * 2, x1, y1], fill=fill)
+
+
+def cover_background(bg_img):
+    bg = bg_img.copy()
+    if bg.width / bg.height > W / H:
+        new_width = int(H * bg.width / bg.height)
+        bg = bg.resize((new_width, H), Image.Resampling.LANCZOS)
+        return bg.crop(((new_width - W) // 2, 0, (new_width - W) // 2 + W, H))
+    new_height = int(W * bg.height / bg.width)
+    bg = bg.resize((W, new_height), Image.Resampling.LANCZOS)
+    return bg.crop((0, (new_height - H) // 2, W, (new_height - H) // 2 + H))
 
 
 def render_slide(text, bg_img, font, overlay_rgb, overlay_alpha):
-    """Render a single slide at W×H using a pre-validated PIL Image as background."""
-    bg = bg_img.copy()
-    bg_r = bg.width / bg.height
-    tgt_r = W / H
-    if bg_r > tgt_r:
-        nh = H; nw = int(nh * bg_r)
-        bg = bg.resize((nw, nh), Image.Resampling.LANCZOS)
-        bg = bg.crop(((nw - W) // 2, 0, (nw - W) // 2 + W, H))
-    else:
-        nw = W; nh = int(nw / bg_r)
-        bg = bg.resize((nw, nh), Image.Resampling.LANCZOS)
-        bg = bg.crop((0, (nh - H) // 2, W, (nh - H) // 2 + H))
-
-    bg = Image.alpha_composite(bg, Image.new("RGBA", (W, H), (0, 0, 0, 50)))
-
-    dummy = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
-    lines = text.split("\n")
-    max_ink_w, total_ink_h, ink_bboxes = measure_lines(dummy, lines, font)
-
-    box_w  = max_ink_w + PAD_H * 2
-    box_h  = total_ink_h + PAD_V * 2
-    box_x0 = max(20, (W - box_w) // 2)
-    box_y0 = max(30, int(H / 4 - box_h / 2))
-    box_x1, box_y1 = box_x0 + box_w, box_y0 + box_h
-
-    ov = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    draw_rounded_rect(ImageDraw.Draw(ov),
-                      box_x0, box_y0, box_x1, box_y1,
-                      BOX_RADIUS,
-                      (*overlay_rgb, overlay_alpha))
-    bg = Image.alpha_composite(bg, ov)
-
-    txt = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    td  = ImageDraw.Draw(txt)
-    cur_y = box_y0 + PAD_V
-    for (ink_w, ink_h, y0_off), line in zip(ink_bboxes, lines):
-        x      = (W - ink_w) // 2
-        draw_y = cur_y - y0_off
-        td.text((x + SHADOW_OFFSET, draw_y + SHADOW_OFFSET),
-                line, font=font, fill=(0, 0, 0, 200))
-        td.text((x, draw_y), line, font=font, fill=(255, 255, 255, 255))
-        cur_y += ink_h + LINE_GAP
-
-    return Image.alpha_composite(bg, txt).convert("RGB")
+    """Create the review JPEG and the flattened-image slide canvas."""
+    bg = Image.alpha_composite(cover_background(bg_img), Image.new("RGBA", (W, H), (0, 0, 0, 50)))
+    layout = layout_for_text(text, font)
+    overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    rounded_rectangle(
+        ImageDraw.Draw(overlay), layout["x"], layout["y"], layout["x"] + layout["w"], layout["y"] + layout["h"],
+        BOX_RADIUS, (*overlay_rgb, overlay_alpha),
+    )
+    bg = Image.alpha_composite(bg, overlay)
+    text_layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(text_layer)
+    current_y = layout["y"] + PAD_V
+    for (ink_width, ink_height, y_offset), line in zip(layout["metrics"], layout["lines"]):
+        x, y = (W - ink_width) // 2, current_y - y_offset
+        draw.text((x + SHADOW_OFFSET, y + SHADOW_OFFSET), line, font=font, fill=(0, 0, 0, 200))
+        draw.text((x, y), line, font=font, fill=(255, 255, 255, 255))
+        current_y += ink_height + LINE_GAP
+    return Image.alpha_composite(bg, text_layer).convert("RGB")
 
 
-def create_pptx(lyrics_data, bg_path, output_path,
-                overlay_rgb, overlay_alpha, font_size, jpeg_quality):
-    # Validate and pre-load background once
+def px_to_emu(value, slide_extent, canvas_extent):
+    return int(value / canvas_extent * slide_extent)
+
+
+def set_fill(shape, rgb, opacity=255):
+    """Apply a solid fill with an OOXML alpha value so it stays editable in PowerPoint."""
+    fill = shape.fill
+    fill.solid()
+    fill.fore_color.rgb = RGBColor(*rgb)
+    color = fill.fore_color._color._xClr
+    alpha = color.find(qn("a:alpha"))
+    if alpha is None:
+        alpha = OxmlElement("a:alpha")
+        color.append(alpha)
+    alpha.set("val", str(round(max(0, min(255, opacity)) / 255 * 100000)))
+
+
+def remove_outline(shape):
+    shape.line.fill.background()
+
+
+def set_cjk_typeface(run, family):
+    """Set East Asian and complex-script typefaces, not just the Latin font slot."""
+    rpr = run._r.get_or_add_rPr()
+    for tag in ("a:ea", "a:cs"):
+        element = rpr.find(qn(tag))
+        if element is None:
+            element = OxmlElement(tag)
+            rpr.append(element)
+        element.set("typeface", family)
+
+
+def add_cover_background(slide, bg_path, slide_width, slide_height):
+    """Place the original image as a cover-cropped native PowerPoint picture."""
+    with Image.open(bg_path) as image:
+        image_ratio = image.width / image.height
+    slide_ratio = slide_width / slide_height
+    picture = slide.shapes.add_picture(bg_path, 0, 0, width=slide_width, height=slide_height)
+    if image_ratio > slide_ratio:
+        crop = (1 - slide_ratio / image_ratio) / 2
+        picture.crop_left = picture.crop_right = crop
+    elif image_ratio < slide_ratio:
+        crop = (1 - image_ratio / slide_ratio) / 2
+        picture.crop_top = picture.crop_bottom = crop
+
+
+def add_editable_slide(prs, text, bg_path, font, font_size_px, overlay_rgb, overlay_alpha):
+    """Add an editable background picture, dimmer, rounded overlay, and lyric textbox."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    add_cover_background(slide, bg_path, prs.slide_width, prs.slide_height)
+
+    dimmer = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, prs.slide_width, prs.slide_height)
+    set_fill(dimmer, (0, 0, 0), 50)
+    remove_outline(dimmer)
+
+    layout = layout_for_text(text, font)
+    x = px_to_emu(layout["x"], prs.slide_width, W)
+    y = px_to_emu(layout["y"], prs.slide_height, H)
+    width = px_to_emu(layout["w"], prs.slide_width, W)
+    height = px_to_emu(layout["h"], prs.slide_height, H)
+    overlay = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, x, y, width, height)
+    set_fill(overlay, overlay_rgb, overlay_alpha)
+    remove_outline(overlay)
+
+    textbox = slide.shapes.add_textbox(x, y, width, height)
+    frame = textbox.text_frame
+    frame.clear()
+    frame.word_wrap = True
+    frame.vertical_anchor = MSO_ANCHOR.MIDDLE
+    frame.margin_left = px_to_emu(PAD_H, prs.slide_width, W)
+    frame.margin_right = px_to_emu(PAD_H, prs.slide_width, W)
+    frame.margin_top = px_to_emu(PAD_V, prs.slide_height, H)
+    frame.margin_bottom = px_to_emu(PAD_V, prs.slide_height, H)
+    for index, line in enumerate(layout["lines"]):
+        paragraph = frame.paragraphs[0] if index == 0 else frame.add_paragraph()
+        paragraph.text = line
+        paragraph.alignment = PP_ALIGN.CENTER
+        paragraph.space_after = Pt(LINE_GAP * 72 / 96) if index < len(layout["lines"]) - 1 else Pt(0)
+        for run in paragraph.runs:
+            run.font.name = EDITABLE_FONT_FAMILY
+            run.font.size = Pt(font_size_px * 72 / 96)
+            run.font.bold = True
+            run.font.color.rgb = RGBColor(255, 255, 255)
+            set_cjk_typeface(run, EDITABLE_FONT_FAMILY)
+
+
+def set_presentation_render_mode(prs, render_mode):
+    props = prs.core_properties
+    previous = [item.strip() for item in (props.keywords or "").split(";") if item.strip() and not item.strip().startswith(RENDER_MODE_KEYWORD_PREFIX)]
+    props.keywords = "; ".join(previous + [f"{RENDER_MODE_KEYWORD_PREFIX}{render_mode}"])
+    props.subject = "Church worship lyric slides"
+
+
+def get_presentation_render_mode(prs):
+    """Return the recorded mode, or None for a pre-v1.4.0 deck without a marker."""
+    for item in (prs.core_properties.keywords or "").split(";"):
+        item = item.strip()
+        if item.startswith(RENDER_MODE_KEYWORD_PREFIX):
+            mode = item.removeprefix(RENDER_MODE_KEYWORD_PREFIX)
+            return mode if mode in RENDER_MODES else None
+    return None
+
+
+def create_pptx(lyrics_data, bg_path, output_path, overlay_rgb, overlay_alpha, font_size, jpeg_quality, render_mode):
     bg_img = validate_background(bg_path)
-
-    all_lines = [l for s in lyrics_data for l in s["text"].split("\n")]
+    all_lines = [line for slide in lyrics_data for line in slide["text"].split("\n")]
     font, used_size = auto_font_size(all_lines, font_size)
-    print(f"Render: {W}x{H}  |  font: {used_size}px  |  "
-          f"overlay: rgb{overlay_rgb} alpha={overlay_alpha}  |  "
-          f"JPEG quality: {jpeg_quality}")
-
-    tmp_dir = os.path.join(os.path.dirname(output_path), "_slide_imgs")
-    os.makedirs(tmp_dir, exist_ok=True)
+    print(f"Render: {W}x{H} | mode: {render_mode} | font: {used_size}px | overlay: rgb{overlay_rgb} alpha={overlay_alpha}")
+    preview_dir = os.path.join(os.path.dirname(os.path.abspath(output_path)), "_slide_imgs")
+    os.makedirs(preview_dir, exist_ok=True)
 
     prs = Presentation()
-    prs.slide_width  = Inches(13.333)
-    prs.slide_height = Inches(7.5)
-
-    for slide in lyrics_data:
-        img_path = os.path.join(tmp_dir, f"slide_{slide['index']:02d}.jpg")
-        render_slide(slide["text"], bg_img, font,
-                     overlay_rgb, overlay_alpha).save(
-                         img_path, "JPEG", quality=jpeg_quality, optimize=True)
-        sl = prs.slides.add_slide(prs.slide_layouts[6])
-        sl.shapes.add_picture(img_path, 0, 0,
-                              width=prs.slide_width, height=prs.slide_height)
-        size_kb = os.path.getsize(img_path) // 1024
-        print(f"  Slide {slide['index']:02d}: {size_kb} KB")
-
+    prs.slide_width, prs.slide_height = Inches(13.333), Inches(7.5)
+    set_presentation_render_mode(prs, render_mode)
+    for slide_data in lyrics_data:
+        preview_path = os.path.join(preview_dir, f"slide_{slide_data['index']:02d}.jpg")
+        render_slide(slide_data["text"], bg_img, font, overlay_rgb, overlay_alpha).save(preview_path, "JPEG", quality=jpeg_quality, optimize=True)
+        if render_mode == "image":
+            slide = prs.slides.add_slide(prs.slide_layouts[6])
+            slide.shapes.add_picture(preview_path, 0, 0, width=prs.slide_width, height=prs.slide_height)
+        else:
+            add_editable_slide(prs, slide_data["text"], bg_path, font, used_size, overlay_rgb, overlay_alpha)
+        print(f"  Slide {slide_data['index']:02d}: preview {os.path.getsize(preview_path) // 1024} KB")
     prs.save(output_path)
-    final_size = os.path.getsize(output_path)
-    print(f"Saved: {output_path}  ({final_size // 1024} KB)")
+    print(f"Saved: {output_path} ({os.path.getsize(output_path) // 1024} KB)")
 
 
-def parse_color(s):
-    parts = [int(x.strip()) for x in s.split(",")]
-    assert len(parts) == 3 and all(0 <= p <= 255 for p in parts)
-    return tuple(parts)
+def parse_color(value):
+    try:
+        color = tuple(int(item.strip()) for item in value.split(","))
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("Colour must be three comma-separated integers.") from exc
+    if len(color) != 3 or any(item < 0 or item > 255 for item in color):
+        raise argparse.ArgumentTypeError("Colour values must be integers from 0 to 255.")
+    return color
 
 
 def main():
-    p = argparse.ArgumentParser(description="Generate worship slides PPTX")
-    p.add_argument("--lyrics",         required=True,  help="Path to lyrics JSON")
-    p.add_argument("--bg",             required=True,  help="Path to background image")
-    p.add_argument("--output",         required=True,  help="Output .pptx path")
-    p.add_argument("--overlay-color",  default="0,0,0",
-                   help="Overlay RGB e.g. '0,0,0' for black")
-    p.add_argument("--overlay-alpha",  type=int, default=185,
-                   help="Overlay opacity 0-255 (default 185 ≈ 73%%)")
-    p.add_argument("--font-size",      type=int, default=0,
-                   help="Font size in px (0 = auto-scale to fit)")
-    p.add_argument("--delivery-mode",  default="standard",
-                   choices=list(DELIVERY_QUALITY.keys()),
-                   help="Output quality: screen (75), standard (92), print (98)")
-    args = p.parse_args()
-
-    jpeg_quality = DELIVERY_QUALITY[args.delivery_mode]
-
-    with open(args.lyrics, "r", encoding="utf-8") as f:
-        lyrics_data = json.load(f)
-
-    create_pptx(
-        lyrics_data,
-        bg_path       = args.bg,
-        output_path   = args.output,
-        overlay_rgb   = parse_color(args.overlay_color),
-        overlay_alpha = args.overlay_alpha,
-        font_size     = args.font_size,
-        jpeg_quality  = jpeg_quality,
-    )
+    parser = argparse.ArgumentParser(description="Generate worship slides PPTX")
+    parser.add_argument("--lyrics", required=True)
+    parser.add_argument("--bg", required=True)
+    parser.add_argument("--output", required=True)
+    parser.add_argument("--overlay-color", default="0,0,0")
+    parser.add_argument("--overlay-alpha", type=int, default=185)
+    parser.add_argument("--font-size", type=int, default=0)
+    parser.add_argument("--delivery-mode", default="standard", choices=list(DELIVERY_QUALITY))
+    parser.add_argument("--render-mode", default="image", choices=RENDER_MODES, help="image = flattened; editable = native PowerPoint shapes")
+    args = parser.parse_args()
+    if not 0 <= args.overlay_alpha <= 255:
+        parser.error("--overlay-alpha must be between 0 and 255.")
+    with open(args.lyrics, encoding="utf-8") as file:
+        lyrics_data = json.load(file)
+    if not isinstance(lyrics_data, list) or not lyrics_data:
+        parser.error("--lyrics must contain a non-empty JSON array.")
+    create_pptx(lyrics_data, args.bg, args.output, parse_color(args.overlay_color), args.overlay_alpha, args.font_size, DELIVERY_QUALITY[args.delivery_mode], args.render_mode)
 
 
 if __name__ == "__main__":

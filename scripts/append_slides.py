@@ -1,110 +1,103 @@
 #!/usr/bin/env python3
-"""
-append_slides.py  –  Append a new song's slides to an existing worship PPTX.
-
-Usage:
-  python append_slides.py \
-    --existing  WorshipSet.pptx \
-    --lyrics    new_song/lyrics.json \
-    --bg        new_song/background.jpg \
-    --output    WorshipSet_updated.pptx \
-    [--overlay-color  "0,0,0"] \
-    [--overlay-alpha  185] \
-    [--font-size      0] \
-    [--delivery-mode  standard]
-
-The script:
-  1. Opens the existing PPTX and counts its current slides.
-  2. Renders the new song's slides using the same pipeline as render_slides.py.
-  3. Appends them to the existing presentation and saves to --output.
-     (--output may be the same path as --existing to overwrite in-place.)
-
-Slide indices in the new song's lyrics.json are automatically offset so they
-do not collide with existing slide image filenames in _slide_imgs/.
-"""
+"""Append slides while preserving a worship deck's image or editable render mode."""
 
 import argparse
 import json
 import os
 import sys
-from PIL import Image, ImageDraw, ImageFont
-from pptx import Presentation
-from pptx.util import Inches
 
-# ── Import shared helpers from render_slides in the same directory ────────────
+from pptx import Presentation
+
 _here = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _here)
-from render_slides import (
-    validate_background,
-    auto_font_size,
-    render_slide,
+from render_slides import (  # noqa: E402
     DELIVERY_QUALITY,
+    RENDER_MODES,
+    add_editable_slide,
+    auto_font_size,
+    get_presentation_render_mode,
+    parse_color,
+    render_slide,
+    set_presentation_render_mode,
+    validate_background,
 )
 
 
-def parse_color(s):
-    parts = [int(x.strip()) for x in s.split(",")]
-    assert len(parts) == 3 and all(0 <= p <= 255 for p in parts)
-    return tuple(parts)
-
-
 def main():
-    p = argparse.ArgumentParser(
-        description="Append a new song's slides to an existing worship PPTX"
+    parser = argparse.ArgumentParser(
+        description="Append a new song to an image-rendered or editable worship PPTX"
     )
-    p.add_argument("--existing",       required=True,  help="Path to existing .pptx")
-    p.add_argument("--lyrics",         required=True,  help="Path to new song lyrics JSON")
-    p.add_argument("--bg",             required=True,  help="Path to background image")
-    p.add_argument("--output",         required=True,  help="Output .pptx path (may equal --existing)")
-    p.add_argument("--overlay-color",  default="0,0,0")
-    p.add_argument("--overlay-alpha",  type=int, default=185)
-    p.add_argument("--font-size",      type=int, default=0)
-    p.add_argument("--delivery-mode",  default="standard",
-                   choices=list(DELIVERY_QUALITY.keys()))
-    args = p.parse_args()
+    parser.add_argument("--existing", required=True, help="Existing PPTX path")
+    parser.add_argument("--lyrics", required=True, help="New song lyrics JSON path")
+    parser.add_argument("--bg", required=True, help="New song background image path")
+    parser.add_argument("--output", required=True, help="Output PPTX path; may equal --existing")
+    parser.add_argument("--overlay-color", default="0,0,0")
+    parser.add_argument("--overlay-alpha", type=int, default=185)
+    parser.add_argument("--font-size", type=int, default=0)
+    parser.add_argument("--delivery-mode", default="standard", choices=list(DELIVERY_QUALITY))
+    parser.add_argument(
+        "--render-mode",
+        default=None,
+        choices=RENDER_MODES,
+        help="Required only for legacy v1.3.0-or-earlier decks without a saved mode marker",
+    )
+    args = parser.parse_args()
+    if not 0 <= args.overlay_alpha <= 255:
+        parser.error("--overlay-alpha must be between 0 and 255.")
 
-    jpeg_quality = DELIVERY_QUALITY[args.delivery_mode]
-    overlay_rgb  = parse_color(args.overlay_color)
-
-    # Load existing presentation
     prs = Presentation(args.existing)
+    recorded_mode = get_presentation_render_mode(prs)
+    if recorded_mode and args.render_mode and args.render_mode != recorded_mode:
+        parser.error(
+            f"--render-mode {args.render_mode!r} conflicts with the existing deck's "
+            f"{recorded_mode!r} mode. Regenerate the whole set to convert modes."
+        )
+    if recorded_mode is None and args.render_mode is None:
+        parser.error(
+            "This legacy deck has no render-mode marker. Pass --render-mode image "
+            "to preserve its flattened format, or regenerate the whole set with "
+            "--render-mode editable to create an editable deck."
+        )
+    render_mode = recorded_mode or args.render_mode
     existing_count = len(prs.slides)
-    print(f"Existing PPTX: {existing_count} slide(s)  →  appending new song…")
+    print(f"Existing PPTX: {existing_count} slide(s) | mode: {render_mode} | appending new song…")
 
-    # Validate background
     bg_img = validate_background(args.bg)
+    with open(args.lyrics, encoding="utf-8") as file:
+        lyrics_data = json.load(file)
+    if not isinstance(lyrics_data, list) or not lyrics_data:
+        parser.error("--lyrics must contain a non-empty JSON array.")
 
-    # Load and prepare new lyrics
-    with open(args.lyrics, "r", encoding="utf-8") as f:
-        lyrics_data = json.load(f)
-
-    all_lines = [l for s in lyrics_data for l in s["text"].split("\n")]
+    all_lines = [line for slide in lyrics_data for line in slide["text"].split("\n")]
     font, used_size = auto_font_size(all_lines, args.font_size)
-    print(f"Font: {used_size}px  |  overlay: rgb{overlay_rgb} alpha={args.overlay_alpha}  |  JPEG quality: {jpeg_quality}")
+    overlay_rgb = parse_color(args.overlay_color)
+    preview_dir = os.path.join(os.path.dirname(os.path.abspath(args.output)), "_slide_imgs")
+    os.makedirs(preview_dir, exist_ok=True)
 
-    # Use a shared _slide_imgs directory next to the output file
-    tmp_dir = os.path.join(os.path.dirname(os.path.abspath(args.output)), "_slide_imgs")
-    os.makedirs(tmp_dir, exist_ok=True)
+    for slide_data in lyrics_data:
+        file_index = existing_count + slide_data["index"]
+        preview_path = os.path.join(preview_dir, f"slide_{file_index:02d}.jpg")
+        render_slide(slide_data["text"], bg_img, font, overlay_rgb, args.overlay_alpha).save(
+            preview_path, "JPEG", quality=DELIVERY_QUALITY[args.delivery_mode], optimize=True
+        )
+        if render_mode == "image":
+            slide = prs.slides.add_slide(prs.slide_layouts[6])
+            slide.shapes.add_picture(preview_path, 0, 0, width=prs.slide_width, height=prs.slide_height)
+        else:
+            add_editable_slide(
+                prs,
+                slide_data["text"],
+                args.bg,
+                font,
+                used_size,
+                overlay_rgb,
+                args.overlay_alpha,
+            )
+        print(f"  Appended slide {file_index:02d}: preview {os.path.getsize(preview_path) // 1024} KB")
 
-    for slide in lyrics_data:
-        # Offset filename index to avoid overwriting existing slide images
-        file_index = existing_count + slide["index"]
-        img_path   = os.path.join(tmp_dir, f"slide_{file_index:02d}.jpg")
-
-        render_slide(slide["text"], bg_img, font,
-                     overlay_rgb, args.overlay_alpha).save(
-                         img_path, "JPEG", quality=jpeg_quality, optimize=True)
-
-        sl = prs.slides.add_slide(prs.slide_layouts[6])
-        sl.shapes.add_picture(img_path, 0, 0,
-                              width=prs.slide_width, height=prs.slide_height)
-        size_kb = os.path.getsize(img_path) // 1024
-        print(f"  Appended slide {file_index:02d}: {size_kb} KB")
-
+    set_presentation_render_mode(prs, render_mode)
     prs.save(args.output)
-    total = len(prs.slides)
-    final_size = os.path.getsize(args.output)
-    print(f"Saved: {args.output}  ({total} slides total, {final_size // 1024} KB)")
+    print(f"Saved: {args.output} ({len(prs.slides)} slides total, {os.path.getsize(args.output) // 1024} KB)")
 
 
 if __name__ == "__main__":

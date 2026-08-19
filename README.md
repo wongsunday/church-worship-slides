@@ -21,6 +21,8 @@ With this skill, you can automate the entire process. Whether you're on the trai
   **自動排版：** 自動分段歌詞（每頁最多三行）並自動調整字體大小。
 - **Multi-Song Sets:** Append multiple songs into a single worship PPTX.
   **多首詩歌：** 可將多首詩歌合併到同一個 PPTX 檔案中。
+- **Editable PowerPoint Option:** Request an editable deck to keep the background, overlay, and lyrics as separate objects for later manual adjustment. The standard image-rendered deck remains available when cross-device visual consistency is more important.
+  **可編輯 PowerPoint 選項：** 可要求輸出可編輯版本，背景、遮罩與歌詞會保留為獨立物件，方便日後手動調整；如較重視不同裝置間的視覺一致性，仍可選擇標準圖片渲染版本。
 - **Self-Updating:** Automatically detects and applies updates from this repository.
   **自動更新：** 啟動時自動檢測並套用此儲存庫的最新更新。
 
@@ -42,14 +44,21 @@ See a real example of the workflow in action:
 
 ---
 
-**2. Adjust lyrics arrangement 調整歌詞鋪排**
+**2. Create an editable PowerPoint 製作可編輯 PowerPoint**
+> "Create this worship deck in editable mode so I can revise the lyrics later in PowerPoint."
+
+> "請用可編輯模式製作這份敬拜投影片，讓我之後能在 PowerPoint 修改歌詞。"
+
+---
+
+**3. Adjust lyrics arrangement 調整歌詞鋪排**
 > "Can you arrange the lyrics to repeat two and a half times? (verse + chorus ×2, then chorus again)"
 
 > "歌詞可以排成兩次半嗎？（主歌+副歌 ×2，再唱副歌）"
 
 ---
 
-**3. Adjust design 調整設計**
+**4. Adjust design 調整設計**
 > "Can you change the background to a sunset over the ocean?"
 
 > "可以把背景換成海上日落的圖片嗎？"
@@ -60,7 +69,7 @@ See a real example of the workflow in action:
 
 ---
 
-**4. Add another song 加入另一首詩歌**
+**5. Add another song 加入另一首詩歌**
 > "Looks great! Now add 《四面環繞的恩惠》 to this worship set."
 
 > "太棒了！現在請將《四面環繞的恩惠》加入這份投影片中。"

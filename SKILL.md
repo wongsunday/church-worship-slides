@@ -1,13 +1,24 @@
 ---
 name: church-worship-slides
-description: "Generate 16:9 church worship presentation slides (PPTX) from song lyrics. Use for: creating worship slides with nature background photos, semi-transparent overlay boxes, and large Chinese/English lyrics. Handles proactive lyrics search and confirmation when only a song name is given, lyric splitting, background search, resolution validation, overlay colour selection, pixel-perfect rendering at Full HD (1920×1080), post-build review loop, and appending multiple songs into one worship set."
+description: "Generate 16:9 church worship presentation slides (PPTX) from song lyrics. Use for: creating worship slides with nature background photos, semi-transparent overlay boxes, and large Chinese/English lyrics. Supports pixel-stable image-rendered decks and editable native PowerPoint-object decks, plus lyric search, design selection, review, and multi-song append workflows."
 metadata:
-  version: "1.3.0"
+  version: "1.4.0"
 ---
 
 # Church Worship Slides
 
-Generates a 16:9 PPTX worship presentation from song lyrics. Each slide shows ≤ 3 lyric lines over a nature photo background with a semi-transparent overlay box. All slides are rendered internally at **1920×1080 (Full HD)** and compressed for delivery.
+Generates a 16:9 PPTX worship presentation from song lyrics. Each slide shows ≤ 3 lyric lines over a nature photo background with a semi-transparent overlay box. The working canvas is **1920×1080 (Full HD)**.
+
+## Render Mode
+
+Before acquiring lyrics, establish the deck’s `render-mode`. If the user does not specify a preference, use `image` for backward compatibility. If the user asks to preserve manual editing capability, use `editable`.
+
+| Render mode | PPTX contents | Best for | Trade-off |
+|---|---|---|---|
+| `image` *(default)* | One fully rendered slide image per slide | Pixel-stable projection across PowerPoint and LibreOffice | Lyrics, overlay, and dimmer cannot be edited independently |
+| `editable` | A native background picture, dimmer rectangle, rounded overlay, and lyric text box per slide | Later manual edits in PowerPoint or compatible editors | Font rendering can vary slightly when the deck is opened on a device without a comparable CJK font |
+
+In `editable` mode, never flatten the slide into a single image. Keep the background, translucent dimmer, overlay, and lyric text as separate PowerPoint objects. Review JPEGs are still generated for chat preview only and are **not** embedded into editable slides.
 
 If the user provides only a song name (without lyrics), **proactively search for the lyrics** and confirm them with the user before proceeding.
 
@@ -160,7 +171,7 @@ avg_brightness = arr[:arr.shape[0]//4, :, :].mean()
 
 ---
 
-## Step 6 – Render ## Step 5 – Render & Deliver Deliver
+## Step 6 – Render & Deliver
 
 ```bash
 python /home/ubuntu/skills/church-worship-slides/scripts/render_slides.py \
@@ -170,10 +181,13 @@ python /home/ubuntu/skills/church-worship-slides/scripts/render_slides.py \
   --overlay-color "<R,G,B>" \
   --overlay-alpha <0-255> \
   --font-size 0 \
-  --delivery-mode standard
+  --delivery-mode standard \
+  --render-mode <image|editable>
 ```
 
-**Delivery modes** (JPEG quality of embedded slide images):
+**Render-mode requirements:** Pass `--render-mode editable` whenever the user asks for later manual editing; otherwise pass `--render-mode image`. Keep this choice fixed for every revision and subsequent song in the same worship set. An existing image-rendered deck cannot be converted to editable by appending; regenerate the complete set in `editable` mode instead.
+
+**Delivery modes** control JPEG quality for the image-rendered deck and all chat review previews:
 
 | Mode | JPEG Quality | Use Case |
 |---|---|---|
@@ -181,7 +195,7 @@ python /home/ubuntu/skills/church-worship-slides/scripts/render_slides.py \
 | `standard` *(default)* | 92 | Normal church projection (balanced) |
 | `print` | 98 | Archival / high-fidelity output |
 
-After the script completes, attach the PPTX and at least 2 preview images (from `_slide_imgs/`) to the result message.
+For `editable` decks, retain the original background as an embedded PowerPoint picture rather than converting it to the review JPEG. After the script completes, attach the PPTX and at least 2 preview images (from `_slide_imgs/`) to the result message.
 
 ---
 
@@ -220,11 +234,14 @@ python /home/ubuntu/skills/church-worship-slides/scripts/append_slides.py \
   --overlay-color "<R,G,B>" \
   --overlay-alpha <0-255> \
   --font-size 0 \
-  --delivery-mode standard
+  --delivery-mode standard \
+  --render-mode <image|editable>
 ```
 
 - `--output` may be the **same path** as `--existing` to update in-place.
-- Slide image filenames are automatically offset so new slides never overwrite existing ones.
+- Decks created in v1.4.0 or later record their render mode automatically. The append script preserves that mode and rejects a conflicting explicit mode.
+- A legacy deck without a stored mode requires `--render-mode image` to append as a flattened deck. To obtain editable slides from a legacy deck, regenerate the entire worship set with `--render-mode editable`.
+- Slide image filenames are automatically offset so new preview files never overwrite existing ones.
 - Each song in the set may have its **own background and overlay** — this is intentional and helps the congregation visually distinguish between songs.
 - After appending, re-deliver the updated PPTX and run the Post-Build Review Loop (Step 6) for the new song.
 
@@ -246,7 +263,8 @@ Save the combined file as `WorshipSet_YYYYMMDD.pptx` in a shared working directo
 | Separate `append_slides.py` script | Keeps the append logic isolated; avoids rewriting the whole PPTX when adding one song |
 | Per-song background in multi-song sets | Visual variety helps congregation follow the order of service |
 | Image consistency per song | Ensure that only **one consistent image** is used as the background for all slides within a single song presentation |
-| Render slides as images, embed in PPTX | Avoids cross-platform font metric differences between PowerPoint/LibreOffice |
+| `image` render mode | Preserves the existing pixel-stable, cross-platform projection behavior |
+| `editable` render mode | Retains separately selectable background, dimmer, overlay, and lyric text objects for later manual editing |
 | Auto font-size scaling | Prevents long lines from overflowing the overlay box |
 
 ---
